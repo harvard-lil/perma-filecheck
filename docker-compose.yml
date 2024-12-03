@@ -3,7 +3,7 @@ services:
         build:
           context: .
           args:
-            clamav-cache-buster: 1138a94d-acad-4372-ac08-7e767e8d929b
+            clamav-cache-buster: 01485d06-be5c-4852-94ee-08834d80afb3
         image: registry.lil.tools/harvardlil/perma-filecheck:0.106
         volumes:
             - .:/app
