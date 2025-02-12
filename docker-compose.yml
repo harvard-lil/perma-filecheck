@@ -3,8 +3,8 @@ services:
         build:
           context: .
           args:
-            clamav-cache-buster: 01485d06-be5c-4852-94ee-08834d80afb3
-        image: registry.lil.tools/harvardlil/perma-filecheck:0.106
+            clamav-cache-buster: CECE03A5-36C9-4583-A6D1-2C860AD22E27
+        image: registry.lil.tools/harvardlil/perma-filecheck:0.107
         volumes:
             - .:/app
         command: ["/bin/bash"]
