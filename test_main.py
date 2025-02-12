@@ -58,7 +58,7 @@ def test_clamd_out_of_date(monkeypatch):
         return subprocess.CompletedProcess(
             args=['clamdscan', '--version'],
             returncode=0,
-            stdout=b'ClamAV 1.0.5/27547/Wed Feb 12 09:40:34 2025\n',
+            stdout=b'ClamAV 0.102.4/25969/Mon Oct 16 12:22:44 2020\n',
             stderr=b'',
         )
     monkeypatch.setattr("main.clamd_version", clamd_version)
