@@ -20,4 +20,5 @@ jobs:
           docker compose exec web flake8
           docker compose exec -d web bash -c "service clamav-daemon start && service clamav-freshclam start && uvicorn main:app --reload --host 0.0.0.0"
           sleep 25
+          docker compose exec web clamdscan --version
           docker compose exec web pytest
