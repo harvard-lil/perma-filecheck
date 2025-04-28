@@ -4,7 +4,7 @@ services:
           context: .
           args:
             clamav-cache-buster: CECE03A5-36C9-4583-A6D1-2C860AD22E27
-        image: registry.lil.tools/harvardlil/perma-filecheck:0.107
+        image: registry.lil.tools/harvardlil/perma-filecheck:0.108
         volumes:
             - .:/app
         command: ["/bin/bash"]
