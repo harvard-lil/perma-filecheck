@@ -1,25 +1,59 @@
-FROM registry.lil.tools/library/python:3.11-bookworm
-ENV PYTHONUNBUFFERED=1
-ENV UVICORN_PORT=8000
+FROM python:3.13-bookworm
 
-# install clamav
-# https://www.clamav.net/documents/installing-clamav#debian
-ARG clamav-cache-buster
+# Environment variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# Install system dependencies and ClamAV
 RUN apt-get update \
-    && apt-get install -y clamav clamav-daemon
+    && apt-get install -y --no-install-recommends \
+        clamav \
+        clamdscan \
+        clamav-daemon \
+        clamav-freshclam \
+        curl \
+        ca-certificates \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
+# Create necessary directories and set permissions
+RUN mkdir -p /var/run/clamav /var/log/clamav \
+    && chown -R clamav:clamav /var/run/clamav /var/log/clamav \
+    && chmod 750 /var/run/clamav
+
+# Configure ClamAV - disable some features that might cause issues
+RUN sed -i 's/^Example/#Example/' /etc/clamav/clamd.conf \
+    && sed -i 's/^#LocalSocket /LocalSocket /' /etc/clamav/clamd.conf \
+    && sed -i 's/^#TCPSocket/TCPSocket/' /etc/clamav/clamd.conf \
+    && sed -i 's/^#TCPAddr/TCPAddr/' /etc/clamav/clamd.conf
+
+# Update ClamAV virus definitions
 RUN freshclam
 
-# pip
-RUN mkdir /app
+# Set up application directory
 WORKDIR /app
-COPY requirements.txt /app
-RUN pip install pip==24.0  \
-    && pip install -r requirements.txt --src /usr/local/src \
+
+# Install Python dependencies
+COPY requirements.txt .
+
+RUN pip install --no-cache-dir --upgrade pip==25.2 \
+    && pip install --no-cache-dir -r requirements.txt --src /usr/local/src \
     && rm requirements.txt
 
+# Copy application files
 COPY docker-entrypoint.sh /docker-entrypoint.sh
-ENTRYPOINT ["/docker-entrypoint.sh"]
-CMD ["/bin/bash", "-c", "uvicorn main:app --host=0.0.0.0 --port=${UVICORN_PORT}"]
+COPY main.py .
 
-COPY main.py /app/main.py
+# Make entrypoint executable
+RUN chmod +x /docker-entrypoint.sh
+
+# Expose port
+EXPOSE 8000
+
+# Entrypoint
+ENTRYPOINT ["/docker-entrypoint.sh"]
+
+# Start application
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4", "--log-level", "info"]
