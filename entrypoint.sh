@@ -1,22 +1,34 @@
 #!/bin/bash
 set -e
 
-# Only initialize ClamAV when starting the app or opening a shell
 if [ "$1" = "/bin/bash" ] || [ "$1" = "uvicorn" ]; then
-    
-    echo "Updating ClamAV signatures..."
-    freshclam
 
-    echo "Starting clamd in background..."
+    echo "-------------------------------------"
+    echo "Updating ClamAV signatures..."
+    echo "-------------------------------------"
+
+    freshclam || echo "WARNING: freshclam update failed"
+
+    echo "-------------------------------------"
+    echo "Starting ClamAV daemon..."
+    echo "-------------------------------------"
+
     clamd &
 
-    # Wait until clamd is fully ready (important!)
     echo "Waiting for clamd socket..."
-    until [ -S /var/run/clamav/clamd.ctl ]; do
+
+    for i in {1..30}; do
+        if [ -S /var/run/clamav/clamd.ctl ]; then
+            echo "ClamAV daemon ready!"
+            break
+        fi
         sleep 1
     done
-    echo "ClamAV daemon ready!"
+
+    if [ ! -S /var/run/clamav/clamd.ctl ]; then
+        echo "ERROR: clamd failed to start"
+        exit 1
+    fi
 fi
 
-# Run the main CMD
 exec "$@"
