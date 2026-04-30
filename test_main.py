@@ -129,3 +129,17 @@ def test_health_healthy(monkeypatch):
     assert response.json() == {
         "status": "healthy",
     }
+
+
+def test_scan_file_unexpected_return_code(monkeypatch, tmp_path):
+    class Result:
+        returncode = 2
+
+    monkeypatch.setattr("main.subprocess.run", lambda *args, **kwargs: Result())
+
+    from main import scan_file
+
+    test_file = tmp_path / "sample.txt"
+    test_file.write_text("hello")
+
+    assert scan_file(str(test_file)) == (False, "clamav scan failed")
