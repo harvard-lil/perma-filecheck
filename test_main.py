@@ -33,7 +33,8 @@ def test_health():
         ("eicar-standard-antivirus-test-file-adobe-acrobat-attachment.pdf", {"safe": False, "reason": "virus detected"}),
         ("misnamed.jpg", {"safe": False, "reason": "invalid file extension"}),
     ])
-def test_response(asset_path, expected_response):
+def test_response(asset_path, expected_response, monkeypatch):
+    monkeypatch.setattr("main.clamav_signature_age", lambda: 0)
     response = post_asset(asset_path)
     assert response.status_code == 200
     assert response.json() == expected_response
@@ -117,4 +118,14 @@ def test_scan_file_too_large(monkeypatch):
     assert response.json() == {
         "safe": False,
         "reason": "file too large",
+    }
+
+
+def test_health_healthy(monkeypatch):
+    monkeypatch.setattr("main.clamav_signature_age", lambda: 0)
+    monkeypatch.setattr("main.clamav_ping", lambda: True)
+
+    response = client.get("/health")
+    assert response.json() == {
+        "status": "healthy",
     }

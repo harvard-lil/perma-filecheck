@@ -49,8 +49,9 @@ def scan_file(path: str):
 
     if result.returncode == 0:
         return True, None
-    elif result.returncode == 1:
+    if result.returncode == 1:
         return False, "virus detected"
+    return False, "clamav scan failed"
 
 
 def clamav_ping():
