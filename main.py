@@ -14,7 +14,7 @@ allowed_types = {
     "image/jpeg": {"jpeg", "jpg"},
     "image/gif": {"gif"},
     "image/png": {"png"},
-    "application/pdf": {"pdf"},
+    "application/pdf": {"pdf"}
 }
 
 MAX_FILE_SIZE = 20 * 1024 * 1024  # 20MB
@@ -51,8 +51,6 @@ def scan_file(path: str):
         return True, None
     elif result.returncode == 1:
         return False, "virus detected"
-    else:
-        return False, "scan error"
 
 
 def clamav_ping():
@@ -109,9 +107,6 @@ async def scan(file: UploadFile = File(...)):
             "reason": "clamav not available"
         }
 
-    if not file.filename:
-        return {"safe": False, "reason": "missing filename"}
-
     _, ext = os.path.splitext(file.filename)
     extension = ext.lower().lstrip(".")
 
@@ -132,7 +127,6 @@ async def scan(file: UploadFile = File(...)):
     size = 0
 
     with NamedTemporaryFile(delete=True) as tmp:
-
         while True:
             chunk = await file.read(8192)
             if not chunk:
