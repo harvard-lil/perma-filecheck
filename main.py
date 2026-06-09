@@ -17,7 +17,7 @@ allowed_types = {
     "application/pdf": {"pdf"}
 }
 
-MAX_FILE_SIZE = 20 * 1024 * 1024  # 20MB
+MAX_FILE_SIZE = 1024 * 1024 * 200 # 200 MB
 MAX_SIGNATURE_AGE = 60 * 60 * 24 * 7  # 7 days
 
 
