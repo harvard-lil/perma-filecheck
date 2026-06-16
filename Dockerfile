@@ -1,10 +1,12 @@
 FROM python:3.13-alpine
 
+# Keep Python output unbuffered and disable bytecode/pip noise
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
+# Install ClamAV and configure it
 RUN apk update && apk upgrade --no-cache \
     && apk add --no-cache \
         bash \
@@ -12,9 +14,11 @@ RUN apk update && apk upgrade --no-cache \
         clamav-daemon \
         freshclam \
         ca-certificates \
+    # Create required runtime directories and set permissions for clamav user
     && mkdir -p /run/clamav /var/run/clamav /var/log/clamav /var/lib/clamav \
     && chown -R clamav:clamav /run/clamav /var/run/clamav /var/log/clamav /var/lib/clamav \
     && chmod -R 775 /run/clamav /var/run/clamav /var/log/clamav /var/lib/clamav \
+    # Configure clamd daemon: use local socket + TCP, run as clamav user
     && printf '%s\n' \
         'LogTime yes' \
         'PidFile /var/run/clamav/clamd.pid' \
@@ -27,14 +31,19 @@ RUN apk update && apk upgrade --no-cache \
         'TCPSocket 3310' \
         'TCPAddr 127.0.0.1' \
         > /etc/clamav/clamd.conf \
+    # Configure freshclam: disable periodic auto-updates (Checks 0) to prevent
+    # clamd mid-operation reloads causing 500 errors. Signatures are updated
+    # once at container startup via entrypoint.sh instead.
     && printf '%s\n' \
         'DatabaseDirectory /var/lib/clamav' \
         'LogTime yes' \
         'DatabaseMirror database.clamav.net' \
+        'Checks 0' \
         > /etc/clamav/freshclam.conf
 
 WORKDIR /app
 
+# Install Python dependencies
 RUN python -m pip install --upgrade "pip>=26.1" \
     && pip install --upgrade \
         "anyio>=4.13.0" \
@@ -65,4 +74,5 @@ RUN chmod +x /entrypoint.sh
 EXPOSE 8080
 
 ENTRYPOINT ["/entrypoint.sh"]
+# Single worker: clamd is a shared resource, multiple workers offer no benefit
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "1", "--log-level", "info"]
