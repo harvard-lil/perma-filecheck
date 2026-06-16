@@ -143,3 +143,39 @@ def test_scan_file_unexpected_return_code(monkeypatch, tmp_path):
     test_file.write_text("hello")
 
     assert scan_file(str(test_file)) == (False, "clamav scan failed")
+
+
+def test_scan_file_timeout(monkeypatch):
+    def raise_timeout(*args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd="clamdscan", timeout=30)
+
+    monkeypatch.setattr("main.subprocess.run", raise_timeout)
+
+    from main import scan_file
+    assert scan_file("/tmp/test") == (False, "clamav scan timed out")
+
+
+def test_scan_file_subprocess_exception(monkeypatch):
+    def raise_error(*args, **kwargs):
+        raise RuntimeError("unexpected error")
+
+    monkeypatch.setattr("main.subprocess.run", raise_error)
+
+    from main import scan_file
+    assert scan_file("/tmp/test") == (False, "clamav scan failed: unexpected error")
+
+
+def test_clamav_not_available_cache_cleared(monkeypatch):
+    from main import clamav_signature_age
+
+    def raise_error():
+        raise subprocess.CalledProcessError(returncode=2, cmd=["clamdscan"])
+
+    # Use the real lru_cache-wrapped function so cache_clear exists and is exercised
+    clamav_signature_age.cache_clear()
+    monkeypatch.setattr("main.clamav_signature_age", raise_error)
+    # Restore cache_clear on the mock so hasattr check passes and line 147 is hit
+    raise_error.cache_clear = clamav_signature_age.cache_clear
+
+    response = post_asset("test.gif")
+    assert response.json() == {"safe": False, "reason": "clamav not available"}

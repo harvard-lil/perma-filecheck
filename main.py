@@ -143,7 +143,8 @@ async def scan(file: UploadFile = File(...)):
                 "reason": "clamav signatures outdated"
             }
     except Exception:
-        clamav_signature_age.cache_clear()
+        if hasattr(clamav_signature_age, 'cache_clear'):
+            clamav_signature_age.cache_clear()
         return {
             "safe": False,
             "reason": "clamav not available"
