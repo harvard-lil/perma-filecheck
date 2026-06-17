@@ -1,14 +1,23 @@
+import logging
 import os
 import subprocess
 from tempfile import NamedTemporaryFile
 from datetime import datetime, timezone
 from functools import lru_cache
 import filetype
-from fastapi import FastAPI, File, UploadFile
+from fastapi import FastAPI, File, Response, UploadFile, status
 from dateutil.parser import parse
 import tempfile
 
 app = FastAPI()
+
+# Configure logging to stdout so logs are picked up by the container runtime
+# (e.g. CloudWatch Logs via ECS awslogs driver)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+)
+logger = logging.getLogger("filecheck")
 
 # Allowed MIME types and their valid file extensions
 allowed_types = {
@@ -19,7 +28,7 @@ allowed_types = {
 }
 
 MAX_FILE_SIZE = 1024 * 1024 * 200  # 200 MB
-MAX_SIGNATURE_AGE = 60 * 60 * 24 * 7  # 7 days
+MAX_SIGNATURE_AGE = 60 * 60 * 24 * 2  # 2 days
 
 
 @lru_cache(maxsize=1)
@@ -44,7 +53,9 @@ def clamav_signature_age():
     if sig_time.tzinfo is None:
         sig_time = sig_time.replace(tzinfo=timezone.utc)
 
-    return (datetime.now(timezone.utc) - sig_time).total_seconds()
+    age = (datetime.now(timezone.utc) - sig_time).total_seconds()
+    logger.info("ClamAV signature age check: %.0f seconds", age)
+    return age
 
 
 def scan_file(path: str):
@@ -62,17 +73,24 @@ def scan_file(path: str):
         )
     except subprocess.TimeoutExpired:
         # clamd took too long — likely mid-reload or overloaded
+        logger.error("clamdscan timed out scanning %s", path)
         return False, "clamav scan timed out"
     except Exception as e:
         # clamdscan binary missing or other unexpected error
+        logger.error("clamdscan failed unexpectedly scanning %s: %s", path, e)
         return False, f"clamav scan failed: {e}"
 
     if result.returncode == 0:
         return True, None
     if result.returncode == 1:
         # returncode 1 means a virus was detected
+        logger.warning("Virus detected in %s: %s", path, result.stdout.strip())
         return False, "virus detected"
     # returncode 2 means clamd error (daemon unavailable, permission issue, etc.)
+    logger.error(
+        "clamdscan returned code %s for %s: %s",
+        result.returncode, path, result.stdout.strip() or result.stderr.strip(),
+    )
     return False, "clamav scan failed"
 
 
@@ -89,33 +107,45 @@ def clamav_ping():
                 text=True,
             )
             return result.returncode in (0, 1)  # 0 = clean, 1 = infected
-        except Exception:
+        except Exception as e:
+            logger.error("clamav_ping failed: %s", e)
             return False
 
 
 @app.get("/health")
-async def health():
+async def health(response: Response):
     """
-    Health check endpoint. Returns unhealthy if:
+    Health check endpoint. Returns HTTP 503 with reason if:
     - clamd is not running or version check fails
     - clamd daemon is not responding to scan requests
-    - virus signatures are older than MAX_SIGNATURE_AGE (7 days)
+    - virus signatures are older than MAX_SIGNATURE_AGE
+
+    Returns HTTP 200 if all checks pass.
     """
     try:
         age = clamav_signature_age()
-    except Exception:
+    except Exception as e:
+        logger.error("Health check failed: clamav version check failed: %s", e)
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
         return {
             "status": "unhealthy",
             "reason": "clamav version check failed",
         }
 
     if not clamav_ping():
+        logger.error("Health check failed: clamav daemon not responding")
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
         return {
             "status": "unhealthy",
             "reason": "clamav daemon not responding",
         }
 
     if age > MAX_SIGNATURE_AGE:
+        logger.warning(
+            "Health check failed: signatures outdated (age=%.0fs, max=%ds)",
+            age, MAX_SIGNATURE_AGE,
+        )
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
         return {
             "status": "unhealthy",
             "reason": "clamav signatures outdated",
@@ -134,15 +164,19 @@ async def scan(file: UploadFile = File(...)):
     Files are passed through (safe=False) rather than raising 500s
     if clamd is temporarily unavailable.
     """
+    logger.info("Scan requested for file: %s", file.filename)
+
     # Check signature age before scanning; clear cache if clamd is unreachable
     # so it re-checks after recovery rather than serving a stale cached result
     try:
         if clamav_signature_age() > MAX_SIGNATURE_AGE:
+            logger.warning("Rejecting scan for %s: signatures outdated", file.filename)
             return {
                 "safe": False,
                 "reason": "clamav signatures outdated"
             }
-    except Exception:
+    except Exception as e:
+        logger.error("clamav not available while scanning %s: %s", file.filename, e)
         if hasattr(clamav_signature_age, 'cache_clear'):
             clamav_signature_age.cache_clear()
         return {
@@ -160,13 +194,19 @@ async def scan(file: UploadFile = File(...)):
     guess = filetype.guess(header)
 
     if not guess:
+        logger.warning("Rejecting %s: unrecognized file type", file.filename)
         return {"safe": False, "reason": "unrecognized file type"}
 
     if guess.mime not in allowed_types:
+        logger.warning("Rejecting %s: invalid file type (%s)", file.filename, guess.mime)
         return {"safe": False, "reason": "invalid file type"}
 
     # Ensure the file extension matches the detected MIME type
     if extension not in allowed_types[guess.mime]:
+        logger.warning(
+            "Rejecting %s: extension does not match detected type (%s)",
+            file.filename, guess.mime,
+        )
         return {"safe": False, "reason": "invalid file extension"}
 
     size = 0
@@ -181,6 +221,7 @@ async def scan(file: UploadFile = File(...)):
             size += len(chunk)
 
             if size > MAX_FILE_SIZE:
+                logger.warning("Rejecting %s: exceeds max file size", file.filename)
                 return {"safe": False, "reason": "file too large"}
 
             tmp.write(chunk)
@@ -192,6 +233,8 @@ async def scan(file: UploadFile = File(...)):
         safe, reason = scan_file(tmp.name)
 
         if not safe:
+            logger.warning("Scan result for %s: unsafe (%s)", file.filename, reason)
             return {"safe": False, "reason": reason}
 
+    logger.info("Scan result for %s: safe", file.filename)
     return {"safe": True, "reason": "file is safe"}

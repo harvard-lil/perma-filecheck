@@ -8,7 +8,7 @@ jobs:
     if: github.event_name == 'pull_request' || github.repository == 'harvard-lil/perma-filecheck'
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6.0.3
 
       - name: Run tests
         shell: 'script -q -e -c "bash --noprofile --norc -eo pipefail {0}"'

@@ -131,20 +131,6 @@ def test_health_healthy(monkeypatch):
     }
 
 
-def test_scan_file_unexpected_return_code(monkeypatch, tmp_path):
-    class Result:
-        returncode = 2
-
-    monkeypatch.setattr("main.subprocess.run", lambda *args, **kwargs: Result())
-
-    from main import scan_file
-
-    test_file = tmp_path / "sample.txt"
-    test_file.write_text("hello")
-
-    assert scan_file(str(test_file)) == (False, "clamav scan failed")
-
-
 def test_scan_file_timeout(monkeypatch):
     def raise_timeout(*args, **kwargs):
         raise subprocess.TimeoutExpired(cmd="clamdscan", timeout=30)
@@ -179,3 +165,19 @@ def test_clamav_not_available_cache_cleared(monkeypatch):
 
     response = post_asset("test.gif")
     assert response.json() == {"safe": False, "reason": "clamav not available"}
+
+
+def test_scan_file_unexpected_return_code(monkeypatch, tmp_path):
+    class Result:
+        returncode = 2
+        stdout = ""
+        stderr = "clamd: connection refused"
+
+    monkeypatch.setattr("main.subprocess.run", lambda *args, **kwargs: Result())
+
+    from main import scan_file
+
+    test_file = tmp_path / "sample.txt"
+    test_file.write_text("hello")
+
+    assert scan_file(str(test_file)) == (False, "clamav scan failed")
