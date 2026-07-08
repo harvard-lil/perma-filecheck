@@ -1,18 +1,15 @@
 name: Tests
 
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request' || github.repository == 'harvard-lil/perma-filecheck'
 
     steps:
-      - uses: actions/checkout@v6.0.3
+      - uses: actions/checkout@v7.0.0
 
       - name: Run tests
         shell: 'script -q -e -c "bash --noprofile --norc -eo pipefail {0}"'
