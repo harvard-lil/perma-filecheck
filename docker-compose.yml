@@ -1,22 +1,15 @@
 services:
-    web:
-        build:
-          context: .
-          args:
-            clamav-cache-buster: CECE03A5-36C9-4583-A6D1-2C860AD22E27
-        image: registry.lil.tools/harvardlil/perma-filecheck:0.108
-        volumes:
-            - .:/app
-        command: ["/bin/bash"]
-        tty: true
-        environment:
-            # let Django load Docker-specific settings conditionally
-            - DOCKERIZED=True
-        extra_hosts:
-          - "filecheck.perma.test:127.0.0.1"
-        ports:
-            - 127.0.0.1:8000:8000
-        # allow profiling with py-spy
-        # https://github.com/benfred/py-spy#how-do-i-run-py-spy-in-docker
-        cap_add:
-            - SYS_PTRACE
+  web:
+    build:
+      context: .
+    image: perma-filecheck
+    volumes:
+      - .:/app
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      - DOCKERIZED=True
+    extra_hosts:
+      - "filecheck.perma.test:127.0.0.1"
+    cap_add:
+      - SYS_PTRACE

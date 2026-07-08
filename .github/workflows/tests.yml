@@ -5,22 +5,20 @@ on: [push, pull_request]
 jobs:
   build:
     runs-on: ubuntu-latest
-    # don't run on pushes to forks
     if: github.event_name == 'pull_request' || github.repository == 'harvard-lil/perma-filecheck'
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6.0.3
 
-      ### run tests ###
-
-      - name: pytest
-        shell: 'script -q -e -c "bash --noprofile --norc -eo pipefail {0}"'  # avoid docker-compose "the input device is not a TTY" -- see https://github.com/actions/runner/issues/241#issuecomment-842566950
+      - name: Run tests
+        shell: 'script -q -e -c "bash --noprofile --norc -eo pipefail {0}"'
         run: |
-          docker compose pull
+          docker compose down --remove-orphans
+          docker compose build --pull
           docker compose up -d
-          docker compose exec web flake8
-          docker compose exec -d web bash -c "service clamav-daemon start && service clamav-freshclam start && uvicorn main:app --reload --host 0.0.0.0"
           sleep 25
+
           docker ps
           docker compose exec web clamdscan --version
-          docker compose exec web pytest
+          docker compose exec web python -m pip install pytest pytest-cov
+          docker compose exec web python -m pytest
