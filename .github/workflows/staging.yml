@@ -11,15 +11,20 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - name: Ensure PR comes from main
+      - name: Ensure PR comes from main in this repository
         run: |
+          if [ "${{ github.event.pull_request.head.repo.full_name }}" != "${{ github.repository }}" ]; then
+            echo "Pull requests into staging cannot come from forks."
+            exit 1
+          fi
+
           if [ "${{ github.head_ref }}" != "main" ]; then
             echo "Pull requests into staging must come from the main branch."
             exit 1
           fi
 
   deploy:
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' && github.repository == 'harvard-lil/perma-filecheck'
     uses: harvard-lil/lil-actions/.github/workflows/ecs-simple-deploy.yml@main
     with:
       app-name: perma-filecheck
