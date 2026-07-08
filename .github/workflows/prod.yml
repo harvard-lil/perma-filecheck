@@ -1,0 +1,27 @@
+name: Production - Deploy to AWS
+
+on:
+  pull_request:
+    branches: [prod]
+  push:
+    branches: [prod]
+
+jobs:
+  validate-source-branch:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ensure PR comes from staging
+        run: |
+          if [ "${{ github.head_ref }}" != "staging" ]; then
+            echo "Pull requests into prod must come from the staging branch."
+            exit 1
+          fi
+
+  deploy:
+    uses: harvard-lil/lil-actions/.github/workflows/ecs-simple-deploy.yml@main
+    with:
+      app-name: perma-filecheck
+      environment: prod
+    secrets:
+      aws-role-arn: ${{ secrets.PROD_AWS_ROLE_TO_ASSUME }}
