@@ -1,0 +1,28 @@
+name: Staging - Deploy to AWS
+
+on:
+  pull_request:
+    branches: [staging]
+  push:
+    branches: [staging]
+
+jobs:
+  validate-source-branch:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ensure PR comes from main
+        run: |
+          if [ "${{ github.head_ref }}" != "main" ]; then
+            echo "Pull requests into staging must come from the main branch."
+            exit 1
+          fi
+
+  deploy:
+    if: github.event_name == 'push'
+    uses: harvard-lil/lil-actions/.github/workflows/ecs-simple-deploy.yml@main
+    with:
+      app-name: perma-filecheck
+      environment: staging
+    secrets:
+      aws-role-arn: ${{ secrets.STAGING_AWS_ROLE_TO_ASSUME }}
