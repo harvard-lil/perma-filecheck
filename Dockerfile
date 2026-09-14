@@ -112,5 +112,11 @@ COPY --chown=filecheck:clamav test_main.py pyproject.toml ./
 COPY --chown=filecheck:clamav test_assets ./test_assets
 
 
+# Local development shares the production runtime and the isolated test tools.
+FROM test AS dev
+
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080", "--reload"]
+
+
 # Keep the deployable target last for callers that do not pass --target.
 FROM runtime-image AS runtime
