@@ -3,23 +3,112 @@ name: Tests
 on:
   pull_request:
     branches: [main]
+  push:
+    branches: [main]
 
 jobs:
-  build:
+  test:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+
+    env:
+      AWS_REGION: us-east-1
+      ECR_REPOSITORY: perma-filecheck
+      LOCAL_RUNTIME_IMAGE: perma-filecheck-runtime:${{ github.sha }}
+      LOCAL_TEST_IMAGE: perma-filecheck-test:${{ github.sha }}
+      PUBLICATION_TAG: ${{ github.sha }}
 
     steps:
-      - uses: actions/checkout@v7.0.0
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Configure AWS credentials
+        if: github.event_name == 'push' && github.repository == 'harvard-lil/perma-filecheck'
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        with:
+          role-to-assume: ${{ secrets.BUILD_AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to AWS ECR
+        id: ecr
+        if: github.event_name == 'push' && github.repository == 'harvard-lil/perma-filecheck'
+        uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
+
+      - name: Inspect this commit's publication
+        id: publication
+        if: github.event_name == 'push' && github.repository == 'harvard-lil/perma-filecheck'
+        uses: harvard-lil/lil-actions/ecr-publication-state@main
+        with:
+          repository: ${{ env.ECR_REPOSITORY }}
+          tag: ${{ env.PUBLICATION_TAG }}
+          registry: ${{ steps.ecr.outputs.registry }}
+
+      - name: Set up Docker Buildx
+        if: github.event_name == 'pull_request' || steps.publication.outputs.state == 'absent'
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      # The test and runtime stages are built from the same Dockerfile graph.
+      # Both stay local; publication happens only after the running test image
+      # passes the health, ClamAV, lint, and application checks below.
+      - name: Build runtime and test images
+        if: github.event_name == 'pull_request' || steps.publication.outputs.state == 'absent'
+        run: |
+          set -euxo pipefail
+          docker buildx build \
+            --platform linux/amd64 \
+            --provenance false \
+            --target runtime \
+            --load \
+            --tag "$LOCAL_RUNTIME_IMAGE" \
+            .
+          docker buildx build \
+            --platform linux/amd64 \
+            --provenance false \
+            --target test \
+            --load \
+            --tag "$LOCAL_TEST_IMAGE" \
+            .
 
       - name: Run tests
+        if: github.event_name == 'pull_request' || steps.publication.outputs.state == 'absent'
+        env:
+          FILECHECK_IMAGE: ${{ env.LOCAL_TEST_IMAGE }}
         shell: 'script -q -e -c "bash --noprofile --norc -eo pipefail {0}"'
         run: |
           docker compose down --remove-orphans
-          docker compose build --pull
-          docker compose up -d
-          sleep 25
+          docker compose up -d --no-build
+
+          for attempt in {1..90}; do
+            if curl --fail --silent http://127.0.0.1:8080/health >/dev/null; then
+              break
+            fi
+            if [ "$attempt" = "90" ]; then
+              docker compose logs
+              exit 1
+            fi
+            sleep 1
+          done
 
           docker ps
-          docker compose exec web clamdscan --version
-          docker compose exec web python -m pip install pytest pytest-cov
-          docker compose exec web python -m pytest
+          docker compose exec -T web clamdscan --version
+          docker compose exec -T web /test/.venv/bin/flake8 main.py test_main.py
+          docker compose exec -T web /test/.venv/bin/python -m pytest
+
+      - name: Publish the tested runtime image
+        id: publish-image
+        if: steps.publication.outputs.state == 'absent'
+        uses: harvard-lil/lil-actions/ecr-publish-image@main
+        with:
+          repository: ${{ env.ECR_REPOSITORY }}
+          registry: ${{ steps.ecr.outputs.registry }}
+          local-image: ${{ env.LOCAL_RUNTIME_IMAGE }}
+          tag: ${{ env.PUBLICATION_TAG }}
+
+      - name: Stop test services
+        if: always() && (github.event_name == 'pull_request' || steps.publication.outputs.state == 'absent')
+        env:
+          FILECHECK_IMAGE: ${{ env.LOCAL_TEST_IMAGE }}
+        run: docker compose down --remove-orphans

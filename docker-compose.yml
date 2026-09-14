@@ -2,9 +2,12 @@ services:
   web:
     build:
       context: .
-    image: perma-filecheck
+      target: test
+    image: ${FILECHECK_IMAGE:-perma-filecheck}
     volumes:
-      - .:/app
+      - ./main.py:/app/main.py:ro
+      - ./test_main.py:/app/test_main.py:ro
+      - ./test_assets:/app/test_assets:ro
     ports:
       - "127.0.0.1:8080:8080"
     environment:
