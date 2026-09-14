@@ -4,16 +4,21 @@ Microservice to check files for expected file type, extension, and antivirus.
 
 ## Local install
 
-    docker compose up
+    docker compose up --build
     docker compose exec web bash
 
 Commands starting with `#` are run inside `docker compose exec web bash`.
 
 ## Local development
 
-Start the web server:
+Compose builds the `dev` target locally and starts Uvicorn with automatic
+reload on port 8080. The target extends the same runtime and isolated test-tool
+layers used by CI; no registry login is required. Source files are mounted from
+the checkout. ClamAV signatures persist in the `clamav_data` volume between
+rebuilds; `docker compose down --volumes` removes that cache.
 
-    # uvicorn main:app --reload --host 0.0.0.0
+Perma can build this target directly from a pinned Git commit, or set its
+`FILECHECK_BUILD_CONTEXT` to a local checkout while working on both services.
 
 Check a file:
 
@@ -52,8 +57,8 @@ New clients should use `verdict` instead of parsing `reason`.
 ## Deployment
 
 The service has no application authentication. Network access is therefore an
-access boundary: the staging endpoint uses an internal ALB whose ingress is
-limited to the Perma staging EC2 security group.
+access boundary: each tier uses an internal ALB whose ingress is
+limited to that tier's Perma EC2 security group.
 
 The network-facing Uvicorn process runs as the unprivileged `filecheck` user;
 the entrypoint starts signature update and `clamd` before dropping privileges.
@@ -61,8 +66,8 @@ Python dependencies come from `uv.lock`; the final image excludes test
 dependencies, uv, and pip. The test target derives from that runtime image
 and adds its tools in a separate virtual environment, so the service under test
 still starts with the production Python environment. Deployment workflows pin
-all third-party actions by commit. The staging ECS task adds a read-only root
-filesystem with dedicated writable ClamAV and temporary-file volumes and does
+all third-party actions by commit. Both tiers' ECS tasks use a read-only root
+filesystem with dedicated writable ClamAV and temporary-file volumes and do
 not assign the application an AWS task role.
 
 An empty task volume downloads its initial ClamAV database before the service
