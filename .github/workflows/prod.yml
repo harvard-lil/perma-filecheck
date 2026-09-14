@@ -6,28 +6,74 @@ on:
   push:
     branches: [prod]
 
+concurrency:
+  group: perma-filecheck-prod
+  cancel-in-progress: false
+
 jobs:
   validate-source-branch:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - name: Ensure PR comes from staging in this repository
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          REPOSITORY: ${{ github.repository }}
         run: |
-          if [ "${{ github.event.pull_request.head.repo.full_name }}" != "${{ github.repository }}" ]; then
+          if [ "$HEAD_REPOSITORY" != "$REPOSITORY" ]; then
             echo "Pull requests into prod cannot come from forks."
             exit 1
           fi
 
-          if [ "${{ github.head_ref }}" != "staging" ]; then
+          if [ "$HEAD_REF" != "staging" ]; then
             echo "Pull requests into prod must come from the staging branch."
             exit 1
           fi
 
-  deploy:
+  prepare:
     if: github.event_name == 'push' && github.repository == 'harvard-lil/perma-filecheck'
-    uses: harvard-lil/lil-actions/.github/workflows/ecs-simple-deploy.yml@main
+    runs-on: ubuntu-latest
+    environment: prod
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      image-digest: ${{ steps.resolve.outputs.image-digest }}
+      source-sha: ${{ steps.resolve.outputs.source-sha }}
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        with:
+          role-to-assume: ${{ secrets.PROD_AWS_ROLE_TO_ASSUME }}
+          aws-region: us-east-1
+
+      - name: Resolve the image staging validated
+        id: resolve
+        uses: harvard-lil/lil-actions/ecs-resolve-service-image@main
+        with:
+          cluster: staging-perma-filecheck
+          service: staging-perma-filecheck
+          container-name: staging-perma-filecheck
+          ecr-repository: perma-filecheck
+
+  deploy:
+    needs: prepare
+    if: always() && needs.prepare.result == 'success'
+    permissions:
+      contents: read
+      id-token: write
+    uses: harvard-lil/lil-actions/.github/workflows/ecs-deploy-image.yml@main
     with:
-      app-name: perma-filecheck
       environment: prod
+      ecr-repository: perma-filecheck
+      image-digest: ${{ needs.prepare.outputs.image-digest }}
+      task-definition-family: prod-perma-filecheck
+      container-name: prod-perma-filecheck
+      cluster: prod-perma-filecheck
+      service: prod-perma-filecheck
+      terraform-tag: prod-latest
+      retention-tag: prod-deployed-${{ needs.prepare.outputs.source-sha }}
     secrets:
       aws-role-arn: ${{ secrets.PROD_AWS_ROLE_TO_ASSUME }}
