@@ -59,6 +59,7 @@ jobs:
           set -euxo pipefail
           docker buildx build \
             --platform linux/amd64 \
+            --build-arg SENTRY_RELEASE="$GITHUB_SHA" \
             --provenance false \
             --target runtime \
             --load \
@@ -66,6 +67,7 @@ jobs:
             .
           docker buildx build \
             --platform linux/amd64 \
+            --build-arg SENTRY_RELEASE="$GITHUB_SHA" \
             --provenance false \
             --target test \
             --load \
@@ -94,7 +96,7 @@ jobs:
 
           docker ps
           docker compose exec -T web clamdscan --version
-          docker compose exec -T web /test/.venv/bin/flake8 main.py test_main.py
+          docker compose exec -T web /test/.venv/bin/flake8 main.py test_main.py test_request_logging.py
           docker compose exec -T web /test/.venv/bin/python -m pytest
 
       - name: Publish the tested runtime image

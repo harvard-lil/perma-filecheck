@@ -2,9 +2,10 @@ services:
   web:
     build:
       context: .
-      target: test
+      target: dev
     image: ${FILECHECK_IMAGE:-perma-filecheck}
     volumes:
+      - clamav_data:/var/lib/clamav
       - ./main.py:/app/main.py:ro
       - ./test_main.py:/app/test_main.py:ro
       - ./test_assets:/app/test_assets:ro
@@ -14,5 +15,6 @@ services:
       - DOCKERIZED=True
     extra_hosts:
       - "filecheck.perma.test:127.0.0.1"
-    cap_add:
-      - SYS_PTRACE
+
+volumes:
+  clamav_data:
