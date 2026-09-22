@@ -83,10 +83,13 @@ EXPOSE 8080
 
 ENTRYPOINT ["/entrypoint.sh"]
 # Single worker: clamd is a shared resource, multiple workers offer no benefit
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "1", "--log-level", "info"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "1", "--log-level", "info", "--no-access-log", "--no-proxy-headers"]
 
 
 FROM runtime-base AS runtime-image
+
+ARG SENTRY_RELEASE=""
+ENV SERVICE_NAME=perma-filecheck ENVIRONMENT=dev SENTRY_RELEASE=${SENTRY_RELEASE}
 
 COPY --from=python-dependencies /app/.venv /app/.venv
 COPY --chown=filecheck:clamav main.py ./
@@ -108,7 +111,7 @@ RUN rm -rf \
 FROM runtime-image AS test
 
 COPY --from=python-test-dependencies /test/.venv /test/.venv
-COPY --chown=filecheck:clamav test_main.py pyproject.toml ./
+COPY --chown=filecheck:clamav test_main.py test_request_logging.py pyproject.toml ./
 COPY --chown=filecheck:clamav test_assets ./test_assets
 
 

@@ -65,7 +65,7 @@ def test_clamav_not_available(monkeypatch):
     assert post_asset("test.gif").json() == {
         "safe": False,
         "verdict": "unavailable",
-        "reason": "clamav not running",
+        "reason": "clamav version check failed",
     }
 
 
@@ -155,7 +155,7 @@ def test_scan_file_timeout(monkeypatch):
     monkeypatch.setattr("main.subprocess.run", raise_timeout)
 
     from main import scan_file
-    assert scan_file("/tmp/test") == (False, "clamav not running")
+    assert scan_file("/tmp/test") == (False, "clamav scan timed out")
 
 
 def test_scan_file_process_start_error(monkeypatch):
@@ -165,7 +165,7 @@ def test_scan_file_process_start_error(monkeypatch):
     monkeypatch.setattr("main.subprocess.run", raise_error)
 
     from main import scan_file
-    assert scan_file("/tmp/test") == (False, "clamav not running")
+    assert scan_file("/tmp/test") == (False, "clamav scanner could not start")
 
 
 def test_clamav_signature_age_is_recomputed(monkeypatch):
@@ -195,4 +195,16 @@ def test_scan_file_unexpected_return_code(monkeypatch, tmp_path):
     test_file = tmp_path / "sample.txt"
     test_file.write_text("hello")
 
-    assert scan_file(str(test_file)) == (False, "clamav not running")
+    assert scan_file(str(test_file)) == (False, "clamav scan failed")
+
+
+def test_scan_version_check_timeout(monkeypatch):
+    def raise_timeout():
+        raise subprocess.TimeoutExpired(cmd="clamdscan --version", timeout=5)
+
+    monkeypatch.setattr("main.clamav_signature_age", raise_timeout)
+    assert post_asset("test.gif").json() == {
+        "safe": False,
+        "verdict": "unavailable",
+        "reason": "clamav version check timed out",
+    }

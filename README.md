@@ -32,7 +32,7 @@ Add a dependency and update the lock file used by the image:
 
 Run lints and tests:
 
-    docker compose exec web /test/.venv/bin/flake8 main.py test_main.py
+    docker compose exec web /test/.venv/bin/flake8 main.py test_main.py test_request_logging.py
     docker compose exec web /test/.venv/bin/python -m pytest
 
 Tests will fail if test coverage goes below 100%.
@@ -48,11 +48,53 @@ Tests will fail if test coverage goes below 100%.
 | `rejected` | File type, extension, or size is invalid | reject |
 | `unavailable` | ClamAV could not provide a trustworthy result | log and fail open |
 
-`safe` and `reason` remain compatible with the current Perma client. Scanner
-failures use `safe: false` with the exact reason `clamav not running`, while
-stale signatures use `safe: false` with `clamav out of date`; Perma recognizes
-those two reasons and fails open. Other `safe: false` results are rejected.
-New clients should use `verdict` instead of parsing `reason`.
+`safe` remains a convenience boolean; `reason` explains the result. Callers
+should use `verdict` to decide whether to reject an upload. A scan exceeding
+30 seconds returns `unavailable` with `clamav scan timed out`; failure to launch
+the scanner returns `clamav scanner could not start`; an unsuccessful scanner
+exit returns `clamav scan failed`. Version-check timeout/failure and stale
+signatures have separate reasons. A timeout does not establish that clamd is
+stopped.
+
+Perma logs `unavailable` as an error and permits the upload, so acceptance does
+not guarantee a completed antivirus scan. Its current client uses `verdict`
+and preserves `reason` in diagnostics. Older clients that recognize only
+`clamav not running` or `clamav out of date` need updating before this version
+is deployed to them. Changing the timeout or fail-open policy is a separate
+operational decision.
+
+## Logging
+
+Uvicorn serves the FastAPI application with
+[`lil-request-logging`](https://github.com/harvard-lil/lil-request-logging)'s
+ASGI middleware. JSON access records go to stdout and ECS sends them to
+`/aws/ecs/taskdefinition/<tier>-perma-filecheck` in CloudWatch. Uvicorn's own
+access logging is disabled to avoid duplicate records. Application and ClamAV
+messages remain available alongside them.
+
+The image sets `SERVICE_NAME=perma-filecheck`; Terraform supplies `ENVIRONMENT`.
+CI embeds the source commit in `SENTRY_RELEASE`, the shared adapter's release
+field. Filecheck does not report directly to Sentry; Perma reports unavailable
+scan results through its existing error logging.
+
+Filecheck receives calls through a private ALB, not a Cloudflare Tunnel.
+Proxy-header rewriting is disabled, and the adapter does not trust forwarded
+client identity. `peer_ip` identifies the direct peer; forwarded-for remains
+explicitly untrusted. Perma does not forward browser identity to the scanner.
+
+Each completed scan handler logs a `scan_result` event with its verdict,
+reason, and duration in milliseconds, including rejected and unavailable
+results. Request duration also includes request/response processing. A scan can
+return HTTP 200 with `verdict=unavailable`, so HTTP status alone does not measure
+scanner success. An incomplete access record is not by itself proof of either
+a server failure or client cancellation.
+
+The managed Perma Grafana dashboard includes Filecheck logs, scan outcomes,
+latency, and ALB/ECS health. Legacy outcomes remain separately labeled; old
+Uvicorn access records have no request duration. Dashboard and task-environment
+changes need separate Terraform applies before image promotion. Verify JSON
+access records, scan outcomes, and populated latency in staging before
+production promotion.
 
 ## Deployment
 

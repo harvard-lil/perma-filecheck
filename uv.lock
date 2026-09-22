@@ -239,6 +239,18 @@ wheels = [
 ]
 
 [[package]]
+name = "lil-request-logging"
+version = "0.1.0"
+source = { url = "https://github.com/harvard-lil/lil-request-logging/releases/download/v0.1.0/lil_request_logging-0.1.0-py3-none-any.whl" }
+wheels = [
+    { url = "https://github.com/harvard-lil/lil-request-logging/releases/download/v0.1.0/lil_request_logging-0.1.0-py3-none-any.whl", hash = "sha256:e8d9b8b8a9c8c2f0434c9fa4e0dbb1baf5e4f9632c2b07fc28ac405134f0ec96" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "gunicorn", marker = "extra == 'gunicorn'", specifier = ">=23,<27" }]
+provides-extras = ["gunicorn"]
+
+[[package]]
 name = "mccabe"
 version = "0.7.0"
 source = { registry = "https://pypi.org/simple" }
@@ -263,6 +275,7 @@ source = { virtual = "." }
 dependencies = [
     { name = "fastapi" },
     { name = "filetype" },
+    { name = "lil-request-logging" },
     { name = "python-dateutil" },
     { name = "python-multipart" },
     { name = "uvicorn" },
@@ -280,6 +293,7 @@ dev = [
 requires-dist = [
     { name = "fastapi", specifier = "==0.136.1" },
     { name = "filetype", specifier = "==1.2.0" },
+    { name = "lil-request-logging", url = "https://github.com/harvard-lil/lil-request-logging/releases/download/v0.1.0/lil_request_logging-0.1.0-py3-none-any.whl" },
     { name = "python-dateutil", specifier = "==2.9.0.post0" },
     { name = "python-multipart", specifier = "==0.0.30" },
     { name = "uvicorn", specifier = "==0.46.0" },

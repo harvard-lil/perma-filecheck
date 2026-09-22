@@ -1,6 +1,9 @@
+import json
 import logging
 import os
 import subprocess
+import sys
+from time import perf_counter
 from datetime import datetime, timezone
 from enum import Enum
 from tempfile import NamedTemporaryFile
@@ -9,12 +12,15 @@ import filetype
 from dateutil.parser import ParserError, parse
 from fastapi import FastAPI, File, Response, UploadFile, status
 from pydantic import BaseModel
+from lil_request_logging.asgi import AccessLog
 
 app = FastAPI()
+app.add_middleware(AccessLog)
 
 # Configure logging to stdout so logs are picked up by the container runtime
 # (e.g. CloudWatch Logs via ECS awslogs driver)
 logging.basicConfig(
+    stream=sys.stdout,
     level=logging.INFO,
     format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
 )
@@ -94,14 +100,13 @@ def scan_file(path: str):
             timeout=30,
         )
     except subprocess.TimeoutExpired:
-        # clamd took too long — likely mid-reload or overloaded
         logger.error("clamdscan timed out scanning %s", path)
-        return False, "clamav not running"
+        return False, "clamav scan timed out"
     except OSError as error:
         # Expected process-start failures include a missing binary and denied
         # execution. Keep environment details in logs, not the API response.
         logger.error("could not start clamdscan for %s: %s", path, error)
-        return False, "clamav not running"
+        return False, "clamav scanner could not start"
 
     if result.returncode == 0:
         return True, None
@@ -117,7 +122,7 @@ def scan_file(path: str):
         path,
         result.stdout.strip() or result.stderr.strip(),
     )
-    return False, "clamav not running"
+    return False, "clamav scan failed"
 
 
 def clamav_ping():
@@ -193,37 +198,49 @@ async def health(response: Response):
 
 @app.post("/scan/", response_model=ScanResult)
 async def scan(file: UploadFile = File(...)):
+    started = perf_counter()
+    result = await scan_upload(file)
+    logger.info(json.dumps({
+        "event": "scan_result",
+        "verdict": result.verdict.value,
+        "reason": result.reason,
+        "duration_ms": round((perf_counter() - started) * 1000, 3),
+    }))
+    return result
+
+
+async def scan_upload(file: UploadFile):
     """
     Accepts a file upload and scans it with ClamAV.
     The verdict is machine-readable so callers can distinguish an unsafe or
     invalid file from an unavailable scanner without parsing reason strings.
     """
     filename = file.filename or ""
-    logger.info("Scan requested for file: %r", filename)
+    logger.info("Scan requested")
 
     # Check signature age before accepting the file for scanning.
     try:
         if clamav_signature_age() > MAX_SIGNATURE_AGE:
             logger.warning(
-                "Rejecting scan for %r: signatures outdated",
-                filename,
+                "Rejecting scan: signatures outdated",
             )
             return scan_result(
                 ScanVerdict.UNAVAILABLE,
                 "clamav out of date",
             )
+    except subprocess.TimeoutExpired:
+        logger.error("ClamAV version check timed out")
+        return scan_result(ScanVerdict.UNAVAILABLE,
+                           "clamav version check timed out")
     except (
         OSError,
         subprocess.SubprocessError,
         ParserError,
         OverflowError,
     ) as error:
-        logger.error(
-            "clamav not available while scanning %r: %s",
-            filename,
-            error,
-        )
-        return scan_result(ScanVerdict.UNAVAILABLE, "clamav not running")
+        logger.error("ClamAV version check failed: %s", error)
+        return scan_result(ScanVerdict.UNAVAILABLE,
+                           "clamav version check failed")
 
     _, ext = os.path.splitext(filename)
     extension = ext.lower().lstrip(".")
@@ -235,20 +252,20 @@ async def scan(file: UploadFile = File(...)):
     guess = filetype.guess(header)
 
     if not guess:
-        logger.warning("Rejecting %r: unrecognized file type", filename)
+        logger.warning("Rejecting scan: unrecognized file type")
         return scan_result(ScanVerdict.REJECTED, "unrecognized file type")
 
     if guess.mime not in allowed_types:
         logger.warning(
-            "Rejecting %r: invalid file type (%s)", filename, guess.mime
+            "Rejecting scan: invalid file type (%s)", guess.mime
         )
         return scan_result(ScanVerdict.REJECTED, "invalid file type")
 
     # Ensure the file extension matches the detected MIME type
     if extension not in allowed_types[guess.mime]:
         logger.warning(
-            "Rejecting %r: extension does not match detected type (%s)",
-            filename, guess.mime,
+            "Rejecting scan: extension does not match detected type (%s)",
+            guess.mime,
         )
         return scan_result(ScanVerdict.REJECTED, "invalid file extension")
 
@@ -264,7 +281,7 @@ async def scan(file: UploadFile = File(...)):
             size += len(chunk)
 
             if size > MAX_FILE_SIZE:
-                logger.warning("Rejecting %r: exceeds max file size", filename)
+                logger.warning("Rejecting scan: exceeds max file size")
                 return scan_result(ScanVerdict.REJECTED, "file too large")
 
             tmp.write(chunk)
@@ -282,12 +299,10 @@ async def scan(file: UploadFile = File(...)):
                 else ScanVerdict.UNAVAILABLE
             )
             logger.warning(
-                "Scan result for %r: %s (%s)",
-                filename,
+                "Scan result: %s (%s)",
                 verdict.value,
                 reason,
             )
             return scan_result(verdict, reason)
 
-    logger.info("Scan result for %r: safe", filename)
     return scan_result(ScanVerdict.CLEAN, "file is safe")
