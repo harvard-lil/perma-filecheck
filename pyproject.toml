@@ -7,6 +7,7 @@ requires-python = ">=3.13,<4"
 dependencies = [
     "fastapi==0.136.1",
     "filetype==1.2.0",
+    "lil-request-logging",
     "python-dateutil==2.9.0.post0",
     "python-multipart==0.0.30",
     "uvicorn==0.46.0",
@@ -22,3 +23,6 @@ dev = [
 
 [tool.pytest.ini_options]
 addopts = "--cov-report term-missing --cov --cov-fail-under=100"
+
+[tool.uv.sources]
+lil-request-logging = { url = "https://github.com/harvard-lil/lil-request-logging/releases/download/v0.1.0/lil_request_logging-0.1.0-py3-none-any.whl" }
